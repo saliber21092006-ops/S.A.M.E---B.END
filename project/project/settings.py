@@ -47,6 +47,7 @@ INSTALLED_APPS = [
 
     'auth_app',
     'chat',
+    'agents',
 ]
 
 MIDDLEWARE = [

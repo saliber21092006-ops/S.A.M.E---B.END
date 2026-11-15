@@ -356,6 +356,7 @@ class ChatStreamView(APIView):
 
         return response
 
+
 # CBV to regenerate the assistant last response 
 class RegenerateChatStream(APIView):
     permission_class = [IsAuthenticated]
@@ -418,3 +419,4 @@ class RegenerateChatStream(APIView):
             return response
 
         return Response({"error": "Can't regenerate. Please try again"}, status=400)
+
