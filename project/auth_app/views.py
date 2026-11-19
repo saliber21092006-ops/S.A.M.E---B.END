@@ -29,7 +29,7 @@ class CookieTokenObtainPairView(APIView):
                 httponly=True,
                 secure=False,
                 samesite='Lax',
-                max_age=3600,
+                max_age=7200,
                 path='/'
             )
 

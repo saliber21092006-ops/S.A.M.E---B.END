@@ -6,9 +6,13 @@ urlpatterns = [
     path('chats/', views.ChatView.as_view()), # returns the chat lists of a user
     path('new-chat/', views.CreateChatID.as_view()), # creates a new chat and returns the new chat id
     path('messages/<uuid:chat_id>/', views.LoadMessagesView.as_view()), # returns the messages under a partcular chat
+    path('message/<uuid:msg_id>/delete/', views.DeleteMessage.as_view()),
+    path('<uuid:chat_id>/chat/', views.GetChatTitle.as_view()),
     # path('streams/', views.ChatStreamView.as_view()), # endpoint for streaming messages 
+
+    # Agent-powered streaming endpoint 
     path('streams/', streamer.ChatStreamView.as_view()),
-    path('re-streams/', views.RegenerateChatStream.as_view()), # re genrates the last assistant response
+    path('re-streams/', streamer.RegenerateChatStream.as_view()), # re genrates the last assistant response
 
     path('messages/', views.ChatMessagesView.as_view()),
     path('stream/', views.StreamChatView.as_view()),

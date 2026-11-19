@@ -140,55 +140,6 @@ class LoadMessagesView(APIView):
         serializer = MessageSerializer(messages, many=True, context={"request":request})
         return Response(serializer.data, status=200)
 
-MAX_FILE_SIZE = 10 * 1024 * 1024 # 10MB per file
-MAX_FILES = 5
-
-ALLOWED_EXTENSIONS = {
-    # Documents
-    "pdf", "doc", "docx", "odt", "ppt", "pptx", "xls", "xlsx", "csv", "rtf",
-    # Texts
-    "txt", "md", "json", "xml", "yaml", "yml", "log",
-    # Codes 
-    "py", "js", "ts", "svelte", "html", "css", "scss", "jsx", "tsx", "java", "cpp", "c", "h", "cs", "php", "go", "rs", "sql", "sh",
-    # Images 
-    "png", "jpg", "jpeg", "gif", "webp", "svg",
-    # Audio 
-    "mp3", "wav", "ogg", "m4a",
-    # Video 
-    "mov", "mp4", "webm"
-}
-
-def get_attachment_type(filename):
-    ext = os.path.splitext(filename)[1].lower()
-
-    if ext in ["pdf", "doc", "docx", "odt", "ppt", "pptx", "xls", "xlsx", "csv", "rtf",]:
-        return "document"
-    if ext in ["txt", "md", "json", "xml", "yaml", "yml", "log",]:
-        return "text"
-    if ext in ["py", "js", "ts", "svelte", "html", "css", "scss", "jsx", "tsx", "java", "cpp", "c", "h", "cs", "php", "go", "rs", "sql", "sh",]:
-        return "code"
-    if ext in ["png", "jpg", "jpeg", "gif", "webp", "svg",]:
-        return "image"
-    if ext in ["mp3", "wav", "ogg", "m4a",]:
-        return "audio"
-    if ext in ["mov", "mp4", "webm"]:
-        return "video"
-    return "other"
-
-def validate_attachments(files):
-    if len(files) > MAX_FILES:
-        return "Maximum of 5 files allowed"
-
-    for file in files:
-        ext = os.path.splitext(file.name)[1].lower()
-
-        if ext not in ALLOWED_EXTENSIONS:
-            return f"Unsupported file type: {file.name}"
-
-        if file.size > MAX_FILE_SIZE:
-            return f"{file.name} exceeds the 10MB limit"
-
-    return None
 
 # the function that takes in the user's message or file (attachment) and generates responses
 # def ai_response_generator(messages, attachments):
@@ -230,8 +181,37 @@ def ai_response_generator(messages):
         raise NotImplementedError("An error occured", e)
 
 # first message summarizer: a lightweight llm function that summarizes the first message of every new cnversation/chat e.g., Msg: Hi -> Summary: Casual greeting 
-def summarize_first_message() -> str:
-    pass
+def summarize_first_message(first_message) -> str:
+    system_prompt = """
+        You are a chat title summarizer for Socratic AI Math Engine (SAME), a chat app. 
+        Your job is to summarize the message of a user in not more than 5 words.
+
+        Example:
+
+        User: Hello!
+        You: Casual greeting.  
+    """
+
+    full_messages = [
+        {
+            "role": "system",
+            "content": system_prompt
+        },
+        {
+            "role": "user",
+            "content": first_message
+        }
+    ]
+
+    print(f"[SUMMARIZER] summarizing '{first_message}'")
+    ai = ollama.chat(
+        model="qwen2.5:1.5b",
+        messages=full_messages,
+        stream=False,
+        think=False
+    )
+
+    return ai['message']['content']
 
 # creates a new chat 
 class CreateChatID(APIView):
@@ -245,7 +225,9 @@ class CreateChatID(APIView):
             return Response({"error": "Message or files/attachments required"}, status=400)
 
         # soon, calls the summarize_first_message to create a chat title 
-        chat = Chat.objects.create(user = self.request.user, title = content[:50] if content else "New conversation")
+        summarizer = summarize_first_message(content)
+        # chat = Chat.objects.create(user = self.request.user, title = content[:50] if content else "New conversation")
+        chat = Chat.objects.create(user = self.request.user, title = summarizer if summarizer else "New conversation")
         is_new_chat = True
 
         response = Response({'chat_id': chat.id}, status=201)
@@ -254,169 +236,205 @@ class CreateChatID(APIView):
         return response
     
 
-class ChatStreamView(APIView):
-    permission_classes = [IsAuthenticated]
-    parser_classes = [MultiPartParser, FormParser, JSONParser]
+# class ChatStreamView(APIView):
+#     permission_classes = [IsAuthenticated]
+#     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
-    def post(self, request):
-        content = request.data.get("content", "")
-        content = str(content).strip()
+#     def post(self, request):
+#         content = request.data.get("content", "")
+#         content = str(content).strip()
 
-        print("HHHHHHHHHHHHHHHHH", content)
+#         print("HHHHHHHHHHHHHHHHH", content)
 
-        chat_id = request.data.get("chat_id")
-        files = request.FILES.getlist("attachments")
+#         chat_id = request.data.get("chat_id")
+#         files = request.FILES.getlist("attachments")
 
-        if not content and not files:
-            return Response({"error": "Message or files/attachments are required."}, status=400)
+#         if not content and not files:
+#             return Response({"error": "Message or files/attachments are required."}, status=400)
 
-        attachment_error = validate_attachments(files)
-        if attachment_error:
-            return Response({"error": attachment_error}, status=400)
+#         attachment_error = validate_attachments(files)
+#         if attachment_error:
+#             return Response({"error": attachment_error}, status=400)
 
-        # check if it's a new or existing chat
-        try:
-            with transaction.atomic():
-                if chat_id:
-                    try:
-                        # checks if the chat_id is valid
-                        chat_id = uuid.UUID(str(chat_id))
-                    except (ValueError, TypeError, AttributeError):
-                        return Response({"error": "Invalid conversation ID"}, status=400)
+#         # check if it's a new or existing chat
+#         try:
+#             with transaction.atomic():
+#                 if chat_id:
+#                     try:
+#                         # checks if the chat_id is valid
+#                         chat_id = uuid.UUID(str(chat_id))
+#                     except (ValueError, TypeError, AttributeError):
+#                         return Response({"error": "Invalid conversation ID"}, status=400)
 
-                    chat = Chat.objects.select_for_update().filter(id = chat_id, user = self.request.user).first()
-                    if not chat:
-                        return Response({"error": "Conversation not found"}, status=400)
-                    is_new_chat = False
-                else:
-                    chat = Chat.objects.create(user = self.request.user, title = content[:50] if content else "New Conversation")
-                    is_new_chat = True
+#                     chat = Chat.objects.select_for_update().filter(id = chat_id, user = self.request.user).first()
+#                     if not chat:
+#                         return Response({"error": "Conversation not found"}, status=400)
+#                     is_new_chat = False
+#                 else:
+#                     chat = Chat.objects.create(user = self.request.user, title = content[:50] if content else "New Conversation")
+#                     is_new_chat = True
 
-                if content and files:
-                    message_type = Message.M_T.MIXED
-                elif files: 
-                    message_type = Message.M_T.FILE
-                else:
-                    message_type = Message.M_T.TEXT
+#                 if content and files:
+#                     message_type = Message.M_T.MIXED
+#                 elif files: 
+#                     message_type = Message.M_T.FILE
+#                 else:
+#                     message_type = Message.M_T.TEXT
 
-                user_message = Message.objects.create(chat = chat, sender = self.request.user, role = "user", content = content, message_type = message_type)
-                Chat.objects.filter(id = chat.id).update(updated_at = timezone.now())
-                for file in files:
-                    attachment = MessageAttachment.objects.create(
-                        message = user_message,
-                        file = file,
-                        original_name = file.name,
-                        file_size = file.size,
-                        mime_type = (getattr(file, "content_type", None) or mimetypes.guess_type(file.name)[0] or "application/octet-stream"),
-                        attachment_type = get_attachment_type(file.name)
-                    )
-                    attachment.save()
+#                 user_message = Message.objects.create(chat = chat, sender = self.request.user, role = "user", content = content, message_type = message_type)
+#                 Chat.objects.filter(id = chat.id).update(updated_at = timezone.now())
+#                 for file in files:
+#                     attachment = MessageAttachment.objects.create(
+#                         message = user_message,
+#                         file = file,
+#                         original_name = file.name,
+#                         file_size = file.size,
+#                         mime_type = (getattr(file, "content_type", None) or mimetypes.guess_type(file.name)[0] or "application/octet-stream"),
+#                         attachment_type = get_attachment_type(file.name)
+#                     )
+#                     attachment.save()
 
-                    attachment_objects = list(user_message.attachments.all())
+#                     attachment_objects = list(user_message.attachments.all())
 
-                previous_messages = list(chat.chat_user_message.exclude(id = user_message.id).order_by("-timestamp"))
-                previous_messages.reverse()
-                history = [{"role": message.role, "content": message.content} for message in previous_messages]
-                history.append({
-                    "role": "user",
-                    "content": content
-                })
+#                 previous_messages = list(chat.chat_user_message.exclude(id = user_message.id).order_by("-timestamp"))
+#                 previous_messages.reverse()
+#                 history = [{"role": message.role, "content": message.content} for message in previous_messages]
+#                 history.append({
+#                     "role": "user",
+#                     "content": content
+#                 })
 
-        except Exception as e:
-            logger.exception("Chat creation error")
-            return Response({"error": "Could not process your message."}, status=500)
+#         except Exception as e:
+#             logger.exception("Chat creation error")
+#             return Response({"error": "Could not process your message."}, status=500)
 
-        # soon updated that assistant would be able to send files 
-        assistant_message = Message.objects.create(chat = chat, role = "assistant", content ="", message_type = Message.M_T.TEXT)
+#         # soon updated that assistant would be able to send files 
+#         assistant_message = Message.objects.create(chat = chat, role = "assistant", content ="", message_type = Message.M_T.TEXT)
 
-        def stream_response():
-            full_response = ""
-            try:
-                for chunk in ai_response_generator(history):
-                    if not chunk:
-                        continue
-                    full_response += chunk
-                    yield chunk
-            except Exception:
-                logger.exception("AI streaming error")
-            finally:
-                assistant_message.content = full_response
-                assistant_message.save(update_fields = ["content", "updated_at"])
+#         def stream_response():
+#             full_response = ""
+#             try:
+#                 for chunk in ai_response_generator(history):
+#                     if not chunk:
+#                         continue
+#                     full_response += chunk
+#                     yield chunk
+#             except Exception:
+#                 logger.exception("AI streaming error")
+#             finally:
+#                 assistant_message.content = full_response
+#                 assistant_message.save(update_fields = ["content", "updated_at"])
 
-                chat.updated_at = timezone.now()
-                Chat.objects.filter(id = chat.id).update(updated_at = chat.updated_at)
+#                 chat.updated_at = timezone.now()
+#                 Chat.objects.filter(id = chat.id).update(updated_at = chat.updated_at)
 
-        response = StreamingHttpResponse(stream_response(), content_type = "text/plain; charset = utf-8")
-        response["X-Chat-ID"] = str(chat.id)
-        response["X-Message-ID"] = str(assistant_message.id)
-        response["X-New-Chat"] = str(is_new_chat).lower()
+#         response = StreamingHttpResponse(stream_response(), content_type = "text/plain; charset = utf-8")
+#         response["X-Chat-ID"] = str(chat.id)
+#         response["X-Message-ID"] = str(assistant_message.id)
+#         response["X-New-Chat"] = str(is_new_chat).lower()
 
-        response["Cache-Control"] = "no-cache"
-        response["X-Access-Buffering"] = "no"
+#         response["Cache-Control"] = "no-cache"
+#         response["X-Access-Buffering"] = "no"
 
-        return response
+#         return response
 
 
-# CBV to regenerate the assistant last response 
-class RegenerateChatStream(APIView):
-    permission_class = [IsAuthenticated]
+# # CBV to regenerate the assistant last response 
+# class RegenerateChatStream(APIView):
+#     permission_class = [IsAuthenticated]
 
-    def post(self, request):
-        chat_id = request.data.get("req_regen", "")
-        if not chat_id:
-            return Response({"error": "can't regenerate without a chat"}, status=400)
+#     def post(self, request):
+#         chat_id = request.data.get("req_regen", "")
+#         if not chat_id:
+#             return Response({"error": "can't regenerate without a chat"}, status=400)
         
-        if chat_id:
-            try:
-                chat_id = uuid.UUID(str(chat_id))
-            except (ValueError, TypeError, AttributeError):
-                return Response({"error": "Invalid conversation ID"}, status=400)
+#         if chat_id:
+#             try:
+#                 chat_id = uuid.UUID(str(chat_id))
+#             except (ValueError, TypeError, AttributeError):
+#                 return Response({"error": "Invalid conversation ID"}, status=400)
             
-            chat = Chat.objects.filter(id = chat_id).first()
-            if not chat:
-                return Response({"error": "Conversation not found"}, status=400)
-            is_new_chat = False
+#             chat = Chat.objects.filter(id = chat_id).first()
+#             if not chat:
+#                 return Response({"error": "Conversation not found"}, status=400)
+#             is_new_chat = False
             
-            # get previous messages : last 5
-            previous_msgs = list(chat.chat_user_message.order_by("-timestamp")[:5][::-1])
-            last_msg = None
-            if previous_msgs:
-                last_msg = previous_msgs.pop()
+#             # get previous messages : last 5
+#             previous_msgs = list(chat.chat_user_message.order_by("-timestamp")[:5][::-1])
+#             last_msg = None
+#             if previous_msgs:
+#                 last_msg = previous_msgs.pop()
 
-            history = [{"id": msg.id, "role": msg.role, "content": msg.content} for msg in previous_msgs]
-            print("HISTORY", history)
-            print("LAST MSG:", last_msg.id, last_msg.role)
-            if last_msg and last_msg.role == 'assistant':
-                msg = Message.objects.get(id = last_msg.id)
-                msg.delete()
+#             history = [{"id": msg.id, "role": msg.role, "content": msg.content} for msg in previous_msgs]
+#             print("HISTORY", history)
+#             print("LAST MSG:", last_msg.id, last_msg.role)
+#             if last_msg and last_msg.role == 'assistant':
+#                 msg = Message.objects.get(id = last_msg.id)
+#                 msg.delete()
 
-            ai_newly_generated_msg = Message.objects.create(chat = chat, role = 'assistant', content ="", message_type = "text")
-            def stream_response():
-                full_response = ""
-                try:
-                    for chunk in ai_response_generator(history):
-                        if not chunk:
-                            continue
-                        full_response += chunk
-                        yield chunk
-                except Exception:
-                    logger.exception("AI streaming error")
-                finally:
-                    ai_newly_generated_msg.content = full_response
-                    ai_newly_generated_msg.save(update_fields = ["content", "updated_at"])
+#             ai_newly_generated_msg = Message.objects.create(chat = chat, role = 'assistant', content ="", message_type = "text")
+#             def stream_response():
+#                 full_response = ""
+#                 try:
+#                     for chunk in ai_response_generator(history):
+#                         if not chunk:
+#                             continue
+#                         full_response += chunk
+#                         yield chunk
+#                 except Exception:
+#                     logger.exception("AI streaming error")
+#                 finally:
+#                     ai_newly_generated_msg.content = full_response
+#                     ai_newly_generated_msg.save(update_fields = ["content", "updated_at"])
     
-                    chat.updated_at = timezone.now()
-                    Chat.objects.filter(id = chat.id).update(updated_at = chat.updated_at)
+#                     chat.updated_at = timezone.now()
+#                     Chat.objects.filter(id = chat.id).update(updated_at = chat.updated_at)
     
-            response = StreamingHttpResponse(stream_response(), content_type = "text/plain; charset = utf-8")
-            response["X-Chat-ID"] = str(chat.id)
-            response["X-Message-ID"] = str(ai_newly_generated_msg.id)
-            response["X-New-Chat"] = str(is_new_chat).lower()
+#             response = StreamingHttpResponse(stream_response(), content_type = "text/plain; charset = utf-8")
+#             response["X-Chat-ID"] = str(chat.id)
+#             response["X-Message-ID"] = str(ai_newly_generated_msg.id)
+#             response["X-New-Chat"] = str(is_new_chat).lower()
     
-            response["Cache-Control"] = "no-cache"
-            response["X-Access-Buffering"] = "no"
+#             response["Cache-Control"] = "no-cache"
+#             response["X-Access-Buffering"] = "no"
     
-            return response
+#             return response
 
-        return Response({"error": "Can't regenerate. Please try again"}, status=400)
+#         return Response({"error": "Can't regenerate. Please try again"}, status=400)
 
+
+class DeleteMessage(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, msg_id):
+        if not msg_id:
+            return
+
+        # try:
+        #     message_id = uuid.UUID(str(msg_id))
+        #     print('[MESSAGE ID]', message)
+        #     # check if message_id is a uuid string 
+        #     if message_id:
+        #         message = Message.objects.get(id=message_id)
+        #         print('[MESSAGE]', message)
+        #         # message.delete()
+        #         return Response({'message': 'deleted successfully'}, 200)
+
+        try:
+            message_id = uuid.UUID(str(msg_id))
+            Message.objects.get(id=message_id).delete()
+            return Response({'message': 'deleted successfully'}, 200)
+        except Exception as e:
+            return Response({'message': f'An error occured: {e}'}, 400)
+
+
+class GetChatTitle(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, chat_id):
+        try:
+            id = uuid.UUID(str(chat_id))
+            chat = Chat.objects.get(id=id)
+            return Response({'title': chat.title}, 200)
+        except Exception as e:
+            return Response({'message': f'{e}'})

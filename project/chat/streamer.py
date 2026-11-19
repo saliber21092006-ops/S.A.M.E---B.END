@@ -12,7 +12,7 @@ from django.db import transaction
 from django.shortcuts import get_object_or_404
 
 from agents import (llm, planner, executor, orchestrator, registry, memory_manager)
-from agents.tools import basic_math
+from agents.tools import basic_math, web_scraper
 
 
 logger = logging.getLogger(__name__)
@@ -21,6 +21,7 @@ _llm = llm.Oll_LLM()
 _registry = registry.ToolRegistry()
 _memory_manager = memory_manager.MemoryManager(llm=_llm)
 
+# ================== TOOL REGISTRATION ======================
 _registry.register(
     name="add_numbers",
     description="Adds two numbers",
@@ -51,6 +52,51 @@ _registry.register(
     function=basic_math.multiply_numbers
 )
 
+_registry.register(
+    name="divide_numbers",
+    description="Divides two numbers",
+    parameters={
+        "type": "object",
+        "properties": {
+            "a": {"type": "number"},
+            "b": {"type": "number"}
+        },
+        "required": ["a", "b"],
+        "additionalProperties": False
+    },
+    function=basic_math.divide_numbers
+)
+
+_registry.register(
+    name="search_and_scrape",
+    description="Searches the web for a query, scrapes the top results, and returns formatted context",
+    parameters={
+        "type": "object",
+        "properties": {
+            "query": {"type": "string"},
+            "num_results": {"type": "number"}
+        },
+        "required": ["query", "num_results"],
+        "additionalProperties": False
+    },
+    function=web_scraper.search_and_scrape
+)
+
+_registry.register(
+    name="scrape_url",
+    description="Fetches a webpage and extracts clean, readable text.",
+    parameters={
+        "type": "object",
+        "properties": {
+            "url": {"type": "string"},
+        },
+        "required": ["url"],
+        "additionalProperties": False
+    },
+    function=web_scraper.scrape_url
+)
+
+# ==================== TOOL REGISTRATION ======================
 
 MAX_FILE_SIZE = 10 * 1024 * 1024 # 10MB per file
 MAX_FILES = 5
@@ -141,9 +187,37 @@ def ai_response_generator(messages):
     except Exception as e:
         raise NotImplementedError("An error occured", e)
 
-# first message summarizer: a lightweight llm function that summarizes the first message of every new cnversation/chat e.g., Msg: Hi -> Summary: Casual greeting 
-def summarize_first_message() -> str:
-    pass
+def summarize_first_message(first_message) -> str:
+    system_prompt = """
+        You are a chat title summarizer for Socratic AI Math Engine (SAME), a chat app. 
+        Your job is to summarize the message of a user in not more than 5 words.
+
+        Example:
+
+        User: Hello!
+        You: Casual greeting.  
+    """
+
+    full_messages = [
+        {
+            "role": "system",
+            "content": system_prompt
+        },
+        {
+            "role": "user",
+            "content": first_message
+        }
+    ]
+
+    print(f"[SUMMARIZER] summarizing '{first_message}'")
+    ai = ollama.chat(
+        model="qwen2.5:1.5b",
+        messages=full_messages,
+        stream=False,
+        think=False
+    )
+
+    return ai['message']['content']
 
 
 class ChatStreamView(APIView):
@@ -185,7 +259,8 @@ class ChatStreamView(APIView):
                         return Response({"error": "Conversation not found"}, status=400)
                     is_new_chat = False
                 else:
-                    chat = Chat.objects.create(user = self.request.user, title = content[:50] if content else "New Conversation")
+                    title = summarize_first_message(content)
+                    chat = Chat.objects.create(user = self.request.user, title = title if title else "New Conversation")
                     is_new_chat = True
 
                 if content and files:
@@ -226,19 +301,60 @@ class ChatStreamView(APIView):
         assistant_message = Message.objects.create(chat = chat, role = "assistant", content ="", message_type = Message.M_T.TEXT)
 
         def stream_response():
-            agent_result = _agent.run(messages=history, user=self.request.user)
-            print("[AGENT RESPONSE]", agent_result)
             full_response = ""
+
+            # try:
+            #      # Run the agent 
+            #     print("[STREAMER] Starting agent response stream...")
+            #     agent_result = _agent.run(messages=history, user=self.request.user)
+            #     print("[AGENT RESPONSE]", agent_result)
+    
+            #     # check if the agent completed successfully 
+            #     if not agent_result["success"]:
+            #         raise RuntimeError(
+            #             agent_result["error"] or agent_result["response"]
+            #             or "The agent failed to generate a response. Please try again."
+            #         )
+
+            #     # get final response from the agent 
+            #     agent_response = agent_result['response']
+
+            #     if not agent_response:
+            #         raise RuntimeError("The agent returned an empty response, or did not return a response. Please try again.")
+                            
+            #     # Temporarily send the completed response as one chunk
+            #     full_response = str(agent_response)
+            #     yield full_response
+
+            #     # for chunk in ai_response_generator(history):
+            #     # for chunk in ai_response_generator(agent_result['response']):
+            #     #     if not chunk:
+            #     #         continue
+            #     #     full_response += chunk
+            #     #     yield chunk
+             
             try:
-                # for chunk in ai_response_generator(history):
-                for chunk in ai_response_generator(agent_result):
+                print("[STREAMER] Starting agent streaming response...")
+                print(f"\n[MSG HISTORY] {history}")
+
+                for chunk in _agent.stream(messages=history, user=self.request.user):
                     if not chunk:
                         continue
                     full_response += chunk
                     yield chunk
+                
+                print("[STREAMER] Agent streaming completed")
+
             except Exception:
-                logger.exception("AI streaming error")
+                logger.exception("Agent streaming error")
+
+                if not full_response:
+                    error_message = ("Sorry, something went wrong while processing your request. Please try again.")
+                    full_response += error_message
+                    yield error_message
+
             finally:
+                # save the response or partial response if interrupted
                 assistant_message.content = full_response
                 assistant_message.save(update_fields = ["content", "updated_at"])
 

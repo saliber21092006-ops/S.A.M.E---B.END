@@ -4,9 +4,9 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 class JWTCookieAuthentication(JWTAuthentication):
 
     def authenticate(self, request):
-        print("hit it!!!", request.COOKIES)
+        # print("hit it!!!", request.COOKIES)
         raw_token = request.COOKIES.get('access')
-        print("Raw token", raw_token)
+        # print("Raw token", raw_token)
 
         if raw_token is not None:
             validated_token = self.get_validated_token(raw_token)

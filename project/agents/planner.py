@@ -109,6 +109,10 @@ class AgentPlanner:
 
             Decision: Use add_numbers with arguments: {{"a": 25, "b": 40}}
 
+            User: What's the latest LLM release
+
+            Decision: Use search_and_scrape with arguments: {{"query": What's the latest LLM release, "num_results": 3}}
+
             RESPONSE FORMAT:
 
             When using a tool, return:
@@ -123,8 +127,7 @@ class AgentPlanner:
             When answering directly, return:
 
             {{
-                "action": "final",
-                "response": "Your answer"
+                "action": "final"
             }}
 
             Return ONLY valid JSON
@@ -163,8 +166,9 @@ class AgentPlanner:
                 raise ValueError(f"Unknown tool: {data['tool']}")
 
         elif action == "final":
-            if not isinstance(data.get('response'), str):
-                raise ValueError('Final response must be a string')
+            pass
+            # if not isinstance(data.get('response'), str):
+            #     raise ValueError('Final response must be a string')
 
         else:
             raise ValueError(f"Unsuported planner action: {action}")
@@ -172,14 +176,14 @@ class AgentPlanner:
         return data
 
     def plan(self, messages, memory_context=""):
+        print(f"[Planner] Conversation: {messages}")
         system_message = {
             "role": "system",
             "content": self.get_system_prompt()
         }
 
         conversation = [
-            system_message,
-            *messages
+            system_message
         ]
 
         if memory_context:
@@ -193,6 +197,7 @@ class AgentPlanner:
         # response = self.llm.generate(conversation, temperature = 0.2)
         response = self.llm.generate(conversation)
         print("[Planner]:", response)
+        print(f"[Planner] Planned Conversation: {conversation}")
 
         return self.parse_response(response=response)
     

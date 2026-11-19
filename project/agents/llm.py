@@ -42,12 +42,13 @@ class Oll_LLM():
         self.model = model
 
     def generate(self, messages):
+        """Generates a complete response (used for planning and memory)"""
         # print(messages)
         try:
             if not messages:
                 raise ValueError("Messages can't be blank")
 
-            print("GENERATING......")
+            print("[LLM] GENERATING RESPONSE......")
             response = ollama.chat(
                 model=self.model,
                 messages=messages,
@@ -61,4 +62,31 @@ class Oll_LLM():
             return response['message']['content']
             
         except Exception as e:
-            raise Exception(f"An error occured: {e}")
+            raise RuntimeError(f"Ollama generation error: {e}") from e
+
+
+    def stream_generate(self, messages):
+        """Generate a response and yield its content chunk by chunk"""
+
+        if not messages:
+            raise ValueError("Messages can't be blank")
+
+        try:
+            print("[LLM] Starting token streaming...")
+
+            response = ollama.chat(
+                model=self.model,
+                messages=messages,
+                stream=True,
+                think=False
+            )
+
+            for chunk in response:
+                content = chunk['message']['content']
+                if content:
+                    yield content
+
+            print("\n [LLM] Streaming completed")
+
+        except Exception as e:
+            raise RuntimeError(f"Ollama streaming error: {e}") from e

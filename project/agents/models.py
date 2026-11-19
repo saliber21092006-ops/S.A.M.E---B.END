@@ -19,7 +19,7 @@ class AgentMemory(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        # model_name_plural = "Agent Memories"
+        verbose_name_plural = "Agent Memories"
         ordering = ["-importance", "-updated_at"]
         indexes = [
             models.Index(fields=['user', 'category']),
